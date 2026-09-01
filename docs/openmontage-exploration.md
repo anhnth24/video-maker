@@ -106,6 +106,19 @@ Có GPU thì `make install-gpu` mở khóa video generation local (Wan 2.1/2.2, 
 
 Lưu ý license: **AGPLv3** — nếu dựa trên code của nó và cung cấp dưới dạng dịch vụ mạng thì phải mở mã nguồn phần dẫn xuất.
 
+## Đã kiểm chứng: render video mẫu zero-key
+
+Đã render thành công demo `world-in-numbers` (23s, 1920x1080 h264 + AAC, 4.5MB) ngay trong môi trường cloud, **không cần API key nào**. Yêu cầu tối thiểu cho đường demo này:
+
+1. **Node.js 18+** và **npm** (demo Remotion không cần Python deps, không cần ffmpeg hệ thống — Remotion tự đóng gói encoder).
+2. `cd remotion-composer && npm install`
+3. `python3 render_demo.py --list` để xem 3 demo có sẵn (`world-in-numbers`, `code-to-screen`, `focusflow-pitch`), rồi `python3 render_demo.py world-in-numbers` (hoặc `make demo` để render cả 3).
+4. Máy cần tải được Chrome Headless Shell (Remotion tự tải) và Google Fonts.
+
+Muốn video "thật" hơn demo (có giọng đọc, ảnh AI, footage): thêm `make setup` (Python venv + requirements + Piper TTS) và tùy chọn API key trong `.env` — mỗi key mở thêm provider, hoàn toàn optional.
+
+Lưu ý riêng cho môi trường sandbox có proxy TLS-intercept (như Claude Code cloud): Remotion launch Chrome với `--no-proxy-server` nên browser không tải được Google Fonts qua proxy. Workaround đã dùng: (1) trỏ `--browser-executable` vào Chromium có sẵn với `--chrome-mode=chrome-for-testing`, (2) tải trước các file woff2 của SpaceGrotesk/PlayfairDisplay vào `remotion-composer/public/gfonts/` và sửa URL trong `node_modules/@remotion/google-fonts/dist/{esm,cjs}/` sang đường dẫn local, (3) xóa `node_modules/.cache` rồi render. Trên máy cá nhân có mạng bình thường thì không cần bước nào trong số này.
+
 ## Ghi chú về việc fork
 
 Session này chỉ có quyền GitHub trên `anhnth24/video-maker` nên không fork được `calesthio/OpenMontage` qua API từ đây (đã thử, bị từ chối). Repo đã được clone local để khám phá. Để fork thật về tài khoản `anhnth24`: bấm **Fork** trên trang GitHub của repo, hoặc mở session Claude Code mới với OpenMontage làm source repo.

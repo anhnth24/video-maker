@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Chùa Online</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="stage">
+    <canvas id="scene" width="1080" height="1920"></canvas>
+  </div>
+
+  <aside id="panel">
+    <h2>Chùa Online · TikTok Live</h2>
+    <div class="row">
+      <input id="username" placeholder="@username TikTok đang live" />
+      <button id="btnConnect">Kết nối</button>
+      <button id="btnDisconnect" class="ghost">Ngắt</button>
+    </div>
+    <div id="status">Trạng thái: chưa kết nối</div>
+
+    <h3>Giả lập (test không cần live)</h3>
+    <div class="row wrap">
+      <button data-sim="join">+1 người vào</button>
+      <button data-sim="join10">+10 người vào</button>
+      <button data-sim="gift">Tặng quà ngẫu nhiên</button>
+      <button data-sim="gift5">5 người tặng</button>
+      <button data-sim="chat">Bình luận</button>
+      <button data-sim="auto" id="btnAuto">Tự động: TẮT</button>
+    </div>
+    <p class="hint">Mở <code>?overlay=1</code> để ẩn bảng này (dùng làm Browser Source trong OBS / TikTok LIVE Studio).</p>
+  </aside>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

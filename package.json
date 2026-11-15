@@ -1,0 +1,26 @@
+{
+  "name": "chua-online-tiktok",
+  "version": "1.0.0",
+  "description": "Overlay đi chùa online tích hợp TikTok Live",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/anhnth24/video-maker.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/anhnth24/video-maker/issues"
+  },
+  "homepage": "https://github.com/anhnth24/video-maker#readme",
+  "dependencies": {
+    "express": "^5.1.0",
+    "socket.io": "^4.8.1",
+    "tiktok-live-connector": "^2.5.0"
+  },
+  "private": true
+}

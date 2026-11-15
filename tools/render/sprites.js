@@ -2,10 +2,10 @@
 import * as THREE from 'three';
 import { makeRenderer, makeEnv, lathe } from './common.js';
 
-const FW = 220, FH = 330;          // kích thước 1 frame trong sheet
+const FW = 160, FH = 240;          // kích thước 1 frame trong sheet
 const SS = 2;                       // render supersample
 const COLS = 10;
-const PITCH = THREE.MathUtils.degToRad(31); // khớp góc nhìn camera nền
+const PITCH = THREE.MathUtils.degToRad(38); // khớp góc nhìn camera nền
 const VIEW_H = 2.35;                // chiều cao khung nhìn (mét)
 
 // Động tác: [tên, số frame, fps, loop]
@@ -18,15 +18,23 @@ export const ANIMS = [
   ['walkRi', 8, 10, true],
   ['walkL', 8, 10, true],       // đi sang trái, chắp tay
   ['walkR', 8, 10, true],
-  ['bow', 12, 9, false],        // vái (1 lạy)
+  ['bow', 12, 9, false],        // vái (1 lạy), cầm hương
   ['plant', 10, 9, false],      // cắm hương
+  ['walkBn', 8, 10, true],      // đi lên, tay không (lễ vật vẽ ở runtime)
+  ['bown', 12, 9, false],       // vái, tay không
+  ['plantn', 10, 9, false],     // đặt lễ
 ];
 
 const VARIANTS = [
-  { robe: 0x9fb2d4, hair: 0x141012, bun: false, trim: 0xe8edf6 },
-  { robe: 0x9a6a40, hair: 0x9a9590, bun: true, trim: 0xd9b48a },
-  { robe: 0xc8ccd6, hair: 0x1c1512, bun: true, trim: 0xf4f6fa },
-  { robe: 0x7d93bb, hair: 0xd8d4d0, bun: false, trim: 0xdfe6f2 },
+  // Khu Tài Lộc: áo vàng
+  { zone: 'tai', robe: 0xe2ac2c, hair: 0x141012, bun: true, trim: 0xfff0b8 },
+  { zone: 'tai', robe: 0xf0d48a, hair: 0x1c1512, bun: false, trim: 0xd89a20 },
+  // Khu Bình An: áo lam / trắng
+  { zone: 'an', robe: 0x6f8fdc, hair: 0x141012, bun: true, trim: 0xf2d27a },
+  { zone: 'an', robe: 0xe2e7f4, hair: 0x1c1512, bun: false, trim: 0x8aa0dc },
+  // Khu Tình Duyên: áo hồng
+  { zone: 'tinh', robe: 0xee86b2, hair: 0x141012, bun: true, trim: 0xfff0f6 },
+  { zone: 'tinh', robe: 0xf8c6d8, hair: 0x1c1512, bun: false, trim: 0xe0508c },
 ];
 
 const lerp = (a, b, t) => a + (b - a) * t;
@@ -57,6 +65,9 @@ function poseFor(anim, f, n) {
     case 'sit': p.kneel = 1; break;
     case 'stand': p.kneel = 1 - ease(u); p.bow = Math.sin(u * Math.PI) * 0.35; break;
     case 'walkB': p.stride = (f / n) * Math.PI * 2; p.incense = true; break;
+    case 'walkBn': p.stride = (f / n) * Math.PI * 2; break;
+    case 'bown': p.bow = Math.pow(Math.sin(u * Math.PI), 1.3); break;
+    case 'plantn': { const r = Math.sin(u * Math.PI); p.bow = 0.3 * r; p.reach = r; break; }
     case 'walkF': p.stride = (f / n) * Math.PI * 2; p.facing = 'front'; break;
     case 'walkLi': p.stride = (f / n) * Math.PI * 2; p.incense = true; p.facing = 'left'; break;
     case 'walkRi': p.stride = (f / n) * Math.PI * 2; p.incense = true; p.facing = 'right'; break;
@@ -255,6 +266,7 @@ export async function run() {
       personHeight: 1.62,
       anims,
       variants: VARIANTS.map((_, i) => `people_${i}.png`),
+      variantZones: VARIANTS.map((v) => v.zone),
     },
   };
 }

@@ -62,22 +62,22 @@ export function marbleTex() {
   }, { repeat: [6, 10] });
 }
 
-export function carpetTex() {
+export function carpetTex(base = '#9a0f12', dark = '#7a0a0c', gold = '#e2ad45', motif = '#d9a13a') {
   return canvasTex(512, 2048, (g, w, h) => {
-    g.fillStyle = '#9a0f12'; g.fillRect(0, 0, w, h);
+    g.fillStyle = base; g.fillRect(0, 0, w, h);
     const grd = g.createLinearGradient(0, 0, w, 0);
-    grd.addColorStop(0, 'rgba(0,0,0,0.25)'); grd.addColorStop(0.5, 'rgba(255,80,60,0.12)'); grd.addColorStop(1, 'rgba(0,0,0,0.25)');
+    grd.addColorStop(0, 'rgba(0,0,0,0.25)'); grd.addColorStop(0.5, 'rgba(255,255,255,0.08)'); grd.addColorStop(1, 'rgba(0,0,0,0.25)');
     g.fillStyle = grd; g.fillRect(0, 0, w, h);
     // viền vàng
-    g.fillStyle = '#e2ad45'; g.fillRect(14, 0, 22, h); g.fillRect(w - 36, 0, 22, h);
-    g.fillStyle = '#7a0a0c'; g.fillRect(40, 0, 8, h); g.fillRect(w - 48, 0, 8, h);
-    g.fillStyle = '#e2ad45'; g.fillRect(52, 0, 5, h); g.fillRect(w - 57, 0, 5, h);
+    g.fillStyle = gold; g.fillRect(14, 0, 22, h); g.fillRect(w - 36, 0, 22, h);
+    g.fillStyle = dark; g.fillRect(40, 0, 8, h); g.fillRect(w - 48, 0, 8, h);
+    g.fillStyle = gold; g.fillRect(52, 0, 5, h); g.fillRect(w - 57, 0, 5, h);
     // hoa văn giữa
     for (let y = 80; y < h; y += 220) {
       g.save(); g.translate(w / 2, y);
-      g.strokeStyle = '#e2ad45'; g.lineWidth = 6;
+      g.strokeStyle = gold; g.lineWidth = 6;
       g.beginPath(); g.moveTo(0, -70); g.lineTo(70, 0); g.lineTo(0, 70); g.lineTo(-70, 0); g.closePath(); g.stroke();
-      g.fillStyle = '#d9a13a';
+      g.fillStyle = motif;
       for (let a = 0; a < 8; a++) { g.rotate(Math.PI / 4); g.beginPath(); g.ellipse(0, -30, 9, 22, 0, 0, Math.PI * 2); g.fill(); }
       g.beginPath(); g.arc(0, 0, 12, 0, Math.PI * 2); g.fill();
       g.restore();

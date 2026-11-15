@@ -1,6 +1,7 @@
-/* Chùa Online – runtime 2.5D
- * Nền + nhân vật là asset render từ 3D (tools/render). Toạ độ người tính theo mét trong thế giới 3D
- * rồi chiếu ra màn hình bằng ma trận camera (assets/layout.json) nên luôn khớp phối cảnh.
+/* Điện Tam Phúc – runtime 2.5D
+ * - Nền + nhân vật là asset render từ 3D (tools/render). Vị trí tính theo mét rồi chiếu bằng ma trận camera.
+ * - Bình luận chọn điều ước -> ngồi vào khu Tài Lộc / Bình An / Tình Duyên.
+ * - Tặng quà -> đứng dậy, đi lên ban thờ của khu, vái, dâng lễ (loại lễ theo giá trị quà) rồi về chỗ.
  */
 (async () => {
   const W = 1080, H = 1920;
@@ -18,11 +19,39 @@
   if (document.fonts) await Promise.race([document.fonts.ready, new Promise((r) => setTimeout(r, 1500))]);
 
   const CFG = {
-    walkSpeed: 1.25,      // m/s
+    walkSpeed: 1.35,          // m/s
     bows: 3,
-    incenseLife: 90,      // s
+    incenseLife: 90,          // s
+    offeringLife: 150,        // s lễ vật nằm trên ban
     likesPerLotus: 100,
-    lane: layout.world.lane,
+    defaultZone: params.get('zone') || 'balance', // người mới vào: 'balance' = khu ít người nhất, hoặc 'an' | 'tai' | 'tinh'
+  };
+
+  // Điều ước theo bình luận
+  const WISHES = [
+    { zone: 'an', re: /(binh an|suc khoe|gia dao|an lanh)/ },
+    { zone: 'tai', re: /(tai loc|tien tai|may man|cong danh|phat tai|giau)/ },
+    { zone: 'tinh', re: /(tinh duyen|tinh yeu|nhan duyen|hanh phuc|nguoi yeu)/ },
+  ];
+  // Loại lễ theo giá trị 1 món quà (xu)
+  const TIERS = [
+    { key: 'hoa', min: 0, icon: 'rose', label: 'dâng hoa' },
+    { key: 'huong', min: 5, icon: null, label: 'dâng hương' },
+    { key: 'lehoa', min: 30, icon: 'bouquet', label: 'dâng lễ hoa' },
+    { key: 'mamle', min: 99, icon: 'tray', label: 'dâng mâm lễ' },
+    { key: 'dacbiet', min: 500, icon: 'special', label: 'dâng lễ trang trọng' },
+  ];
+  const tierFor = (g) => {
+    const name = (g.name || '').toLowerCase();
+    if (/tiktok/.test(name)) return TIERS[1];
+    let t = TIERS[0];
+    for (const x of TIERS) if ((g.diamonds || 0) >= x.min) t = x;
+    return t;
+  };
+  const ZONE_STYLE = {
+    tai: { title: 'KHU CẦU TÀI LỘC', icon: 'coins', colors: ['#c88a14', '#6a3c04'], glow: '255,210,90' },
+    an: { title: 'KHU CẦU BÌNH AN', icon: 'lotus', colors: ['#2a4cc0', '#0e1e66'], glow: '150,190,255' },
+    tinh: { title: 'KHU CẦU TÌNH DUYÊN', icon: 'heart', colors: ['#d03a74', '#6e0e38'], glow: '255,150,190' },
   };
 
   // ---------- Chiếu 3D -> màn hình ----------
@@ -34,36 +63,75 @@
     return { x: (cx / cw + 1) / 2 * W, y: (1 - cy / cw) / 2 * H };
   }
   const personH = meta.personHeight;
-  function screenScale(x, z) {
-    const a = project(x, 0, z), b = project(x, personH, z);
-    return (a.y - b.y) / meta.heightPx;
+  const screenScale = (x, z) => (project(x, 0, z).y - project(x, personH, z).y) / meta.heightPx;
+
+  const WORLD = layout.world;
+  const zones = {};
+  for (const z of WORLD.zones) {
+    zones[z.key] = {
+      ...z,
+      seats: layout.seats.filter((s) => s.zone === z.key).filter((s) => {
+        const f = project(s.x, 0, s.z);
+        return f.x > 28 && f.x < W - 28 && f.y < H - 150;
+      }).sort((a, b) => a.row - b.row || a.col - b.col).map((s) => ({ ...s, occupant: null })),
+      slots: z.slots.map(([x, zz]) => ({ x, z: zz, by: null })),
+      queue: [],
+      variants: meta.variantZones.map((v, i) => (v === z.key ? i : -1)).filter((i) => i >= 0),
+    };
   }
-
-  // Ghế nhìn thấy được trên màn hình; ưu tiên hàng gần bàn thờ, gần lối giữa
-  const seats = layout.seats.filter((s) => {
-    const f = project(s.x, 0, s.z), h = project(s.x, personH, s.z);
-    return f.x > 50 && f.x < W - 50 && f.y < H - 30 && h.y > 0;
-  }).sort((a, b) => a.row - b.row || a.col - b.col).map((s) => ({ ...s, occupant: null }));
-
-  const slots = layout.slots.map((s) => ({ ...s, by: null }));
   const B = layout.burner;
 
   // ---------- Trạng thái ----------
   const people = new Map();
-  const prayQueue = [];
-  const incense = [];
+  const incense = [];     // nén hương đang cháy {x,y,z,born,tilt}
+  const offerings = [];   // lễ vật trên ban {icon,x,y,z,born}
+  const flying = [];      // lễ vật đang bay lên ban
   const particles = [];
+  const pulses = [];      // hào quang khi có lễ lớn
   const banners = [];
-  const chatLog = [];
-  const motes = Array.from({ length: 80 }, () => ({ x: 120 + Math.random() * 840, y: Math.random() * 1500, v: 8 + Math.random() * 16, f: 0.3 + Math.random() * 0.6, p: Math.random() * 6, r: 0.8 + Math.random() * 1.8 }));
-  let totalLotus = 0;
+  const petals = Array.from({ length: 46 }, () => ({ x: Math.random() * W, y: Math.random() * H, v: 30 + Math.random() * 40, sw: 0.5 + Math.random(), p: Math.random() * 6, r: 5 + Math.random() * 5, rot: Math.random() * 6 }));
+  const motes = Array.from({ length: 70 }, () => ({ x: 120 + Math.random() * 840, y: Math.random() * 1500, v: 8 + Math.random() * 16, f: 0.3 + Math.random() * 0.6, p: Math.random() * 6, r: 0.8 + Math.random() * 1.8 }));
 
   const rand = (a, b) => a + Math.random() * (b - a);
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const now = () => performance.now() / 1000;
   const truncate = (s, n) => (s.length > n ? s.slice(0, n - 1) + '…' : s);
+  const plain = (s) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd');
 
-  function ensurePerson(user) {
+  // ---------- Người & chỗ ngồi ----------
+  function freeSeat(zoneKey) { return zones[zoneKey].seats.find((s) => !s.occupant) || null; }
+  function pickZone() {
+    if (zones[CFG.defaultZone] && freeSeat(CFG.defaultZone)) return CFG.defaultZone;
+    const cands = Object.values(zones).filter((z) => freeSeat(z.key));
+    if (!cands.length) return null;
+    cands.sort((a, b) => a.seats.filter((s) => s.occupant).length - b.seats.filter((s) => s.occupant).length);
+    return cands[0].key;
+  }
+  function evictIdle() {
+    let victim = null;
+    for (const p of people.values()) {
+      if (p.state !== 'seated' || p.offers.length || p.gifts > 0) continue;
+      if (!victim || p.lastActive < victim.lastActive) victim = p;
+    }
+    if (!victim) return false;
+    victim.seat.occupant = null;
+    people.delete(victim.id);
+    return true;
+  }
+  function sit(p, zoneKey) {
+    const seat = freeSeat(zoneKey);
+    if (!seat) return false;
+    if (p.seat) { const f = project(p.x, 0.8, p.z); burst(f.x, f.y, 10); p.seat.occupant = null; }
+    seat.occupant = p;
+    p.seat = seat; p.zone = zoneKey; p.x = seat.x; p.z = seat.z;
+    const vs = zones[zoneKey].variants;
+    p.variant = vs[Art.hash(p.id) % vs.length];
+    const f = project(seat.x, 0.8, seat.z);
+    burst(f.x, f.y, 14, ZONE_STYLE[zoneKey].glow);
+    return true;
+  }
+
+  function ensurePerson(user, wishZone) {
     let p = people.get(user.id);
     if (p) {
       if (user.nickname) p.nickname = user.nickname;
@@ -71,26 +139,21 @@
       p.lastActive = now();
       return p;
     }
-    const seat = takeSeat();
-    if (!seat) return null;
+    let zoneKey = wishZone && freeSeat(wishZone) ? wishZone : pickZone();
+    if (!zoneKey) { if (!evictIdle()) return null; zoneKey = wishZone && freeSeat(wishZone) ? wishZone : pickZone(); }
     p = {
-      id: user.id, nickname: user.nickname || user.id,
-      variant: Art.hash(user.id) % sheets.length,
-      img: null, avatarUrl: null,
-      seat, x: seat.x, z: seat.z,
+      id: user.id, nickname: user.nickname || user.id, img: null, avatarUrl: null,
+      seat: null, zone: null, variant: 0, x: 0, z: 0,
       state: 'seated', anim: 'sit', animT: 0, animReverse: false,
-      path: [], slot: null, bowsLeft: 0, incense: false, planted: false,
-      pending: 0, diamonds: 0, gifts: 0, likes: 0,
+      path: [], slot: null, bowsLeft: 0, tier: null, carrying: false, placed: false,
+      offers: [], wantZone: null, diamonds: 0, gifts: 0, likes: 0,
       lastActive: now(), bubble: null, breath: Math.random() * 6,
     };
-    seat.occupant = p;
+    if (!sit(p, zoneKey)) return null;
     if (user.avatar) setAvatar(p, user.avatar);
     people.set(p.id, p);
-    const f = project(seat.x, 0.9, seat.z);
-    burst(f.x, f.y, 14);
     return p;
   }
-
   function setAvatar(p, url) {
     p.avatarUrl = url;
     const img = new Image();
@@ -99,30 +162,18 @@
     img.src = url;
   }
 
-  function takeSeat() {
-    const free = seats.find((s) => !s.occupant);
-    if (free) return free;
-    let victim = null;
-    for (const p of people.values()) {
-      if (p.state !== 'seated' || p.pending > 0 || p.gifts > 0 || prayQueue.includes(p.id)) continue;
-      if (!victim || p.lastActive < victim.lastActive) victim = p;
-    }
-    if (!victim) return null;
-    const seat = victim.seat;
-    seat.occupant = null;
-    people.delete(victim.id);
-    return seat;
-  }
-
   // ---------- Event TikTok ----------
   function handleEvent(evt) {
-    const p = ensurePerson(evt.user);
+    const wish = evt.type === 'chat' ? (WISHES.find((w) => w.re.test(plain(evt.text || ''))) || {}).zone : null;
+    const p = ensurePerson(evt.user, wish);
     if (!p) return;
     switch (evt.type) {
       case 'chat':
         p.bubble = { text: truncate(evt.text, 26), until: now() + 4.5 };
-        chatLog.push({ name: p.nickname, text: evt.text, born: now() });
-        if (chatLog.length > 5) chatLog.shift();
+        if (wish && wish !== p.zone) {
+          if (p.state === 'seated' && !p.offers.length) sit(p, wish);
+          else p.wantZone = wish;
+        }
         break;
       case 'like': {
         const before = Math.floor(p.likes / CFG.likesPerLotus);
@@ -134,13 +185,13 @@
       case 'gift': {
         const g = evt.gift || {};
         const count = g.count || 1;
+        const tier = tierFor(g);
         p.gifts += count;
         p.diamonds += (g.diamonds || 1) * count;
-        totalLotus += count;
-        banners.push({ name: truncate(p.nickname, 16), gift: g.name || 'quà', count, born: now() });
-        if (banners.length > 3) banners.shift();
-        p.pending += 1;
-        if (!prayQueue.includes(p.id) && p.state === 'seated') prayQueue.push(p.id);
+        banners.push({ name: truncate(p.nickname, 16), text: ` ${tier.label} · ${g.name || 'quà'} x${count}`, zone: p.zone, born: now() });
+        if (banners.length > 2) banners.shift();
+        p.offers.push(tier);
+        if (p.state === 'seated' && !zones[p.zone].queue.includes(p.id)) zones[p.zone].queue.push(p.id);
         break;
       }
     }
@@ -148,8 +199,9 @@
 
   // ---------- Hoạt ảnh ----------
   function play(p, anim, reverse = false) { p.anim = anim; p.animT = 0; p.animReverse = reverse; }
-  function animDone(p) { const a = meta.anims[p.anim]; return !a.loop && p.animT >= a.count / a.fps; }
-  function animProgress(p) { const a = meta.anims[p.anim]; return clamp(p.animT / (a.count / a.fps), 0, 1); }
+  const animLen = (p) => meta.anims[p.anim].count / meta.anims[p.anim].fps;
+  const animDone = (p) => !meta.anims[p.anim].loop && p.animT >= animLen(p);
+  const animProgress = (p) => clamp(p.animT / animLen(p), 0, 1);
   function frameIndex(p) {
     const a = meta.anims[p.anim];
     let f = Math.floor(p.animT * a.fps);
@@ -157,108 +209,144 @@
     if (p.animReverse) f = a.count - 1 - f;
     return a.start + f;
   }
+  const hasIncense = (p) => p.carrying && p.tier && p.tier.key === 'huong';
   function walkAnim(p, dx, dz) {
-    const inc = p.incense ? 'i' : '';
-    if (Math.abs(dx) > Math.abs(dz)) return dx < 0 ? 'walkL' + inc : 'walkR' + inc;
-    if (dz < 0) return 'walkB';
+    const inc = hasIncense(p);
+    if (Math.abs(dx) > Math.abs(dz)) return (dx < 0 ? 'walkL' : 'walkR') + (inc ? 'i' : '');
+    if (dz < 0) return inc ? 'walkB' : 'walkBn';
     return 'walkF';
   }
-
-  function startPrayer(p, slot) {
-    slot.by = p; p.slot = slot;
-    p.pending = Math.max(0, p.pending - 1);
-    p.state = 'standing';
-    play(p, 'stand');
+  function aisleFor(p) {
+    const z = zones[p.zone];
+    return z.key === 'an' ? (p.seat.x < 0 ? -WORLD.aisleX : WORLD.aisleX) : z.aisle;
   }
-
+  function routeUp(p) {
+    const a = aisleFor(p), rz = p.seat.z - 0.5;
+    return [{ x: p.seat.x, z: rz }, { x: a, z: rz }, { x: a, z: WORLD.crossZ }, { x: p.slot.x, z: WORLD.crossZ }, { x: p.slot.x, z: p.slot.z }];
+  }
+  function routeBack(p) {
+    const a = aisleFor(p), rz = p.seat.z - 0.5;
+    return [{ x: p.slot.x, z: WORLD.crossZ }, { x: a, z: WORLD.crossZ }, { x: a, z: rz }, { x: p.seat.x, z: rz }, { x: p.seat.x, z: p.seat.z }];
+  }
   function stepPath(p, dt) {
     let dist = CFG.walkSpeed * dt;
     while (dist > 0 && p.path.length) {
       const t = p.path[0];
       const dx = t.x - p.x, dz = t.z - p.z, d = Math.hypot(dx, dz);
-      const want = walkAnim(p, dx, dz);
-      if (p.anim !== want) { const keep = p.animT; play(p, want); p.animT = keep; }
+      if (d > 0.001) { const want = walkAnim(p, dx, dz); if (p.anim !== want) { const keep = p.animT; play(p, want); p.animT = keep; } }
       if (d <= dist) { p.x = t.x; p.z = t.z; p.path.shift(); dist -= d; }
       else { p.x += (dx / d) * dist; p.z += (dz / d) * dist; dist = 0; }
     }
     return p.path.length === 0;
   }
 
+  // Điểm đặt lễ trên ban của từng khu
+  function offerSpot(zoneKey) {
+    if (zoneKey === 'an') { const s = Math.random() < 0.5 ? -1 : 1; return { x: s * rand(1.05, 2.3), y: WORLD.stageH + 0.02, z: WORLD.stageFrontZ - 0.25 }; }
+    const o = zones[zoneKey].offer;
+    return { x: o[0] + rand(-0.95, 0.95), y: 0.86, z: o[2] + rand(-0.18, 0.18) };
+  }
+  function incenseSpot(zoneKey, px) {
+    if (zoneKey === 'an') return { x: B.x + clamp(px - B.x, -0.45, 0.45) + rand(-0.04, 0.04), y: B.y - 0.02, z: B.z + 0.25 + rand(-0.12, 0.12) };
+    const o = zones[zoneKey].offer;
+    return { x: o[0] + rand(-0.14, 0.14), y: 1.02, z: o[2] + rand(-0.08, 0.08) };
+  }
+
+  function deliver(p, t) {
+    const tier = p.tier, zk = p.zone;
+    const from = project(p.x, 1.35, p.z - 0.3);
+    if (tier.key === 'huong') {
+      for (let i = 0; i < 3; i++) { const s = incenseSpot(zk, p.x); incense.push({ ...s, born: t, tilt: rand(-0.12, 0.12) }); }
+      while (incense.length > 90) incense.shift();
+      burst(from.x, from.y - 20, 16);
+    } else {
+      const spot = offerSpot(zk);
+      flying.push({ icon: tier.icon, from, spot, born: t, dur: 0.7, tier });
+    }
+    if (tier.key === 'dacbiet' || tier.key === 'mamle') {
+      const d = layout.deities[zk]; const c = project(d[0], d[1], d[2]);
+      pulses.push({ x: c.x, y: c.y, born: t, big: tier.key === 'dacbiet', glow: ZONE_STYLE[zk].glow });
+      if (tier.key === 'dacbiet') for (let i = 0; i < 6; i++) setTimeout(() => firework(c.x + rand(-260, 260), c.y + rand(-260, 40)), i * 260);
+    }
+    floatLotus(from.x + rand(-30, 30), from.y - 40);
+  }
+
   function update(dt) {
     const t = now();
-    for (const slot of slots) {
-      if (slot.by || !prayQueue.length) continue;
-      const p = people.get(prayQueue.shift());
-      if (p && p.state === 'seated') startPrayer(p, slot);
+    for (const z of Object.values(zones)) {
+      for (const slot of z.slots) {
+        if (slot.by || !z.queue.length) continue;
+        const p = people.get(z.queue.shift());
+        if (!p || p.state !== 'seated' || !p.offers.length) continue;
+        slot.by = p; p.slot = slot; p.tier = p.offers.shift();
+        p.state = 'standing'; play(p, 'stand');
+      }
     }
     for (const p of people.values()) {
       p.animT += dt;
       switch (p.state) {
         case 'standing':
-          if (animDone(p)) {
-            p.incense = true;
-            const lx = p.seat.side * CFG.lane;
-            p.path = [{ x: lx, z: p.seat.z }, { x: lx, z: p.slot.z + 0.9 }, { x: p.slot.x, z: p.slot.z }];
-            p.state = 'toAltar';
-          }
+          if (animDone(p)) { p.carrying = true; p.path = routeUp(p); p.state = 'toAltar'; }
           break;
         case 'toAltar':
-          if (stepPath(p, dt)) { p.state = 'bowing'; p.bowsLeft = CFG.bows; play(p, 'bow'); }
+          if (stepPath(p, dt)) { p.state = 'bowing'; p.bowsLeft = CFG.bows; play(p, hasIncense(p) ? 'bow' : 'bown'); }
           break;
         case 'bowing':
           if (animDone(p)) {
-            p.bowsLeft--;
-            if (p.bowsLeft > 0) play(p, 'bow');
-            else { p.state = 'planting'; p.planted = false; play(p, 'plant'); }
+            if (--p.bowsLeft > 0) play(p, hasIncense(p) ? 'bow' : 'bown');
+            else { p.state = 'placing'; p.placed = false; play(p, hasIncense(p) ? 'plant' : 'plantn'); }
           }
           break;
-        case 'planting':
-          if (!p.planted && animProgress(p) > 0.5) {
-            p.planted = true; p.incense = false;
-            const dx = clamp(p.x - B.x, -0.45, 0.45);
-            for (const o of [-0.05, 0, 0.05]) incense.push({ x: B.x + dx + o + rand(-0.03, 0.03), z: B.z + 0.25 + rand(-0.12, 0.12), born: t, tilt: rand(-0.12, 0.12) });
-            while (incense.length > 60) incense.shift();
-            const tip = project(B.x + dx, B.y + 0.3, B.z);
-            burst(tip.x, tip.y, 22);
-            floatLotus(tip.x + rand(-40, 40), tip.y - 30);
-          }
-          if (animDone(p)) {
-            const lx = p.seat.side * CFG.lane;
-            p.path = [{ x: lx, z: p.slot.z + 0.9 }, { x: lx, z: p.seat.z }, { x: p.seat.x, z: p.seat.z }];
-            p.slot.by = null; p.slot = null;
-            p.state = 'toSeat';
-          }
+        case 'placing':
+          if (!p.placed && animProgress(p) > 0.5) { p.placed = true; deliver(p, t); p.carrying = false; }
+          if (animDone(p)) { p.path = routeBack(p); p.slot.by = null; p.slot = null; p.state = 'toSeat'; }
           break;
         case 'toSeat':
           if (stepPath(p, dt)) { p.state = 'sitting'; play(p, 'stand', true); }
           break;
         case 'sitting':
           if (animDone(p)) {
-            p.state = 'seated'; play(p, 'sit');
-            if (p.pending > 0 && !prayQueue.includes(p.id)) prayQueue.push(p.id);
+            p.state = 'seated'; play(p, 'sit'); p.tier = null;
+            if (p.wantZone && !p.offers.length) { sit(p, p.wantZone); p.wantZone = null; }
+            if (p.offers.length && !zones[p.zone].queue.includes(p.id)) zones[p.zone].queue.push(p.id);
           }
           break;
       }
       if (p.bubble && p.bubble.until < t) p.bubble = null;
     }
 
+    for (let i = flying.length - 1; i >= 0; i--) {
+      const f = flying[i];
+      if (t - f.born >= f.dur) {
+        offerings.push({ icon: f.icon, ...f.spot, born: t });
+        const s = project(f.spot.x, f.spot.y, f.spot.z); burst(s.x, s.y - 10, 12);
+        flying.splice(i, 1);
+      }
+    }
+    while (offerings.length > 60) offerings.shift();
+    for (let i = offerings.length - 1; i >= 0; i--) if (t - offerings[i].born > CFG.offeringLife) offerings.splice(i, 1);
     for (let i = incense.length - 1; i >= 0; i--) if (t - incense[i].born > CFG.incenseLife) incense.splice(i, 1);
-    for (const s of incense) if (s.tipX && Math.random() < dt * 2.2) addSmoke(s.tipX, s.tipY, 1);
+    for (const s of incense) if (s.tipX && Math.random() < dt * 1.6) addSmoke(s.tipX, s.tipY, 0.9);
     for (let i = particles.length - 1; i >= 0; i--) {
       const q = particles[i];
       q.age += dt;
-      q.x += (q.kind === 'smoke' ? q.vx + Math.sin(q.age * 1.6 + q.seed) * 14 : q.vx) * dt;
+      q.x += (q.kind === 'smoke' ? q.vx + Math.sin(q.age * 1.6 + q.seed) * 12 : q.vx) * dt;
       q.y += q.vy * dt;
-      if (q.kind === 'spark') q.vy += 90 * dt;
+      if (q.kind === 'spark') q.vy += (q.g ?? 90) * dt;
       if (q.age >= q.life) particles.splice(i, 1);
     }
-    if (particles.length > 800) particles.splice(0, particles.length - 800);
+    if (particles.length > 1200) particles.splice(0, particles.length - 1200);
+    while (pulses.length && t - pulses[0].born > 3.5) pulses.shift();
     while (banners.length && t - banners[0].born > 5.5) banners.shift();
   }
 
-  function addSmoke(x, y, s) { particles.push({ kind: 'smoke', x, y, vx: rand(-4, 4), vy: rand(-42, -26), life: rand(3.5, 5.5), age: 0, r: rand(3, 6) * s, seed: Math.random() * 6 }); }
-  function burst(x, y, n) { for (let i = 0; i < n; i++) particles.push({ kind: 'spark', x, y, vx: rand(-110, 110), vy: rand(-170, -50), life: rand(0.6, 1.3), age: 0, r: rand(1.5, 3.5) }); }
-  function floatLotus(x, y) { particles.push({ kind: 'lotus', x, y, vx: rand(-12, 12), vy: rand(-55, -38), life: 6.5, age: 0 }); }
+  function addSmoke(x, y, s) { particles.push({ kind: 'smoke', x, y, vx: rand(-4, 4), vy: rand(-36, -22), life: rand(3, 5), age: 0, r: rand(2.5, 5) * s, seed: Math.random() * 6 }); }
+  function burst(x, y, n, rgb = '255,214,120') { for (let i = 0; i < n; i++) particles.push({ kind: 'spark', rgb, x, y, vx: rand(-90, 90), vy: rand(-140, -40), life: rand(0.5, 1.1), age: 0, r: rand(1.2, 3) }); }
+  function floatLotus(x, y) { particles.push({ kind: 'lotus', x, y, vx: rand(-12, 12), vy: rand(-50, -34), life: 6, age: 0 }); }
+  function firework(x, y) {
+    const rgb = ['255,220,120', '255,140,190', '150,200,255', '255,170,90'][Math.floor(Math.random() * 4)];
+    for (let i = 0; i < 46; i++) { const a = (i / 46) * Math.PI * 2, v = rand(120, 240); particles.push({ kind: 'spark', rgb, x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, g: 120, life: rand(0.9, 1.6), age: 0, r: rand(1.8, 3.4) }); }
+  }
 
   // ---------- Vẽ ----------
   const haloP = project(...layout.halo);
@@ -267,80 +355,96 @@
   function drawAmbient(t) {
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
-    // tia hào quang xoay chậm
     ctx.translate(haloP.x, haloP.y);
     ctx.rotate(t * 0.04);
     for (let i = 0; i < 28; i++) {
       ctx.rotate((Math.PI * 2) / 28);
-      ctx.fillStyle = 'rgba(255,214,140,0.022)';
-      ctx.beginPath(); ctx.moveTo(-5, 120); ctx.lineTo(5, 120); ctx.lineTo(34, 520); ctx.lineTo(-34, 520); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = 'rgba(255,214,140,0.02)';
+      ctx.beginPath(); ctx.moveTo(-4, 80); ctx.lineTo(4, 80); ctx.lineTo(26, 380); ctx.lineTo(-26, 380); ctx.closePath(); ctx.fill();
     }
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    const pulse = 0.75 + 0.25 * Math.sin(t * 0.6);
-    for (const [x, w, a] of [[430, 130, 0.03], [650, 170, 0.028], [540, 300, 0.02]]) {
-      ctx.fillStyle = Art.lin(ctx, 0, 120, 0, 1600, [[0, `rgba(255,220,150,${a * pulse})`], [1, 'rgba(255,220,150,0)']]);
-      ctx.beginPath(); ctx.moveTo(x - w * 0.3, 120); ctx.lineTo(x + w * 0.3, 120); ctx.lineTo(x + w, 1600); ctx.lineTo(x - w, 1600); ctx.closePath(); ctx.fill();
+    for (const p of pulses) {
+      const u = (t - p.born) / 3.5, R = (p.big ? 520 : 300) * (0.4 + u * 0.8);
+      ctx.fillStyle = Art.rad(ctx, p.x, p.y, 0, R, [[0, `rgba(${p.glow},${0.55 * (1 - u)})`], [1, `rgba(${p.glow},0)`]]);
+      ctx.beginPath(); ctx.arc(p.x, p.y, R, 0, Math.PI * 2); ctx.fill();
     }
     for (const m of motes) {
       const y = ((m.y - t * m.v) % 1500 + 1500) % 1500 + 150;
       const x = m.x + Math.sin(t * m.f + m.p) * 22;
-      ctx.fillStyle = `rgba(255,232,170,${0.22 + 0.22 * Math.sin(t * 2 + m.p)})`;
+      ctx.fillStyle = `rgba(255,232,170,${0.2 + 0.2 * Math.sin(t * 2 + m.p)})`;
       ctx.beginPath(); ctx.arc(x, y, m.r, 0, Math.PI * 2); ctx.fill();
     }
     ctx.restore();
-    for (const c of candles) Art.flame(ctx, c.x, c.y + 8, t, 0.85);
+    for (const c of candles) Art.flame(ctx, c.x, c.y + 4, t, 0.55);
   }
 
   function drawIncense(t) {
     for (const s of incense) {
       const burnt = clamp((t - s.born) / CFG.incenseLife, 0, 1);
-      const len = 0.36 * (1 - burnt * 0.7);
-      const base = project(s.x, B.y - 0.02, s.z);
-      const tip = project(s.x + Math.sin(s.tilt) * len, B.y - 0.02 + Math.cos(s.tilt) * len, s.z);
-      ctx.strokeStyle = '#b4542a'; ctx.lineWidth = 2.6;
+      const len = 0.38 * (1 - burnt * 0.7);
+      const base = project(s.x, s.y, s.z);
+      const tip = project(s.x + Math.sin(s.tilt) * len, s.y + Math.cos(s.tilt) * len, s.z);
+      ctx.strokeStyle = '#b4542a'; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.moveTo(base.x, base.y); ctx.lineTo(tip.x, tip.y); ctx.stroke();
       ctx.save(); ctx.globalCompositeOperation = 'lighter';
-      ctx.fillStyle = Art.rad(ctx, tip.x, tip.y, 0, 11, [[0, 'rgba(255,170,60,0.9)'], [1, 'rgba(255,90,20,0)']]);
-      ctx.beginPath(); ctx.arc(tip.x, tip.y, 11, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = Art.rad(ctx, tip.x, tip.y, 0, 8, [[0, 'rgba(255,170,60,0.9)'], [1, 'rgba(255,90,20,0)']]);
+      ctx.beginPath(); ctx.arc(tip.x, tip.y, 8, 0, Math.PI * 2); ctx.fill();
       ctx.restore();
-      ctx.fillStyle = '#ffe2a0'; ctx.beginPath(); ctx.arc(tip.x, tip.y, 2.2, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#ffe2a0'; ctx.beginPath(); ctx.arc(tip.x, tip.y, 1.6, 0, Math.PI * 2); ctx.fill();
       s.tipX = tip.x; s.tipY = tip.y;
+    }
+  }
+
+  function drawOfferings(t) {
+    for (const o of offerings) {
+      const s = project(o.x, o.y, o.z);
+      const a = clamp((CFG.offeringLife - (t - o.born)) / 3, 0, 1);
+      ctx.globalAlpha = a;
+      Art.icon(ctx, o.icon, s.x, s.y - 10, 0.62);
+      ctx.globalAlpha = 1;
+    }
+    for (const f of flying) {
+      const u = clamp((t - f.born) / f.dur, 0, 1), e = u * u * (3 - 2 * u);
+      const to = project(f.spot.x, f.spot.y, f.spot.z);
+      const x = f.from.x + (to.x - f.from.x) * e, y = f.from.y + (to.y - 10 - f.from.y) * e - Math.sin(u * Math.PI) * 70;
+      Art.icon(ctx, f.icon, x, y, 0.9 - 0.25 * e);
     }
   }
 
   function drawPerson(p, t) {
     const f = project(p.x, 0, p.z);
     const k = screenScale(p.x, p.z);
-    // bóng đổ
-    ctx.fillStyle = 'rgba(30,8,0,0.35)';
-    const sw = (p.state === 'seated' || p.anim === 'stand' ? 46 : 34) * k * 2.2;
-    ctx.beginPath(); ctx.ellipse(f.x, f.y, sw, sw * 0.32, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(30,8,0,0.32)';
+    const sw = (p.anim === 'sit' || p.anim === 'stand' ? 44 : 32) * k * 1.5;
+    ctx.beginPath(); ctx.ellipse(f.x, f.y, sw, sw * 0.36, 0, 0, Math.PI * 2); ctx.fill();
     const idx = frameIndex(p);
     const sx = (idx % meta.cols) * meta.frameW, sy = Math.floor(idx / meta.cols) * meta.frameH;
     const breathe = p.state === 'seated' ? 1 + Math.sin(t * 1.4 + p.breath) * 0.008 : 1;
-    const w = meta.frameW * k, h = meta.frameH * k * breathe;
-    ctx.drawImage(sheets[p.variant], sx, sy, meta.frameW, meta.frameH, f.x - meta.footX * k, f.y - meta.footY * k * breathe, w, h);
-    // khói hương trên tay
-    if (p.incense && Math.random() < 0.18) {
-      const hp = project(p.x, 1.55, p.z - 0.15);
-      addSmoke(hp.x, hp.y, 0.6);
-    }
-    // đỉnh đầu (để đặt bảng tên)
+    ctx.drawImage(sheets[p.variant], sx, sy, meta.frameW, meta.frameH, f.x - meta.footX * k, f.y - meta.footY * k * breathe, meta.frameW * k, meta.frameH * k * breathe);
     let hf = 1;
     if (p.anim === 'sit') hf = 0.6;
     else if (p.anim === 'stand') { const u = animProgress(p); hf = p.animReverse ? 1 - 0.4 * u : 0.6 + 0.4 * u; }
-    else if (p.anim === 'bow') hf = 1 - 0.18 * Math.sin(animProgress(p) * Math.PI);
-    p._tag = { x: f.x, y: f.y - meta.heightPx * k * hf, k };
+    else if (p.anim === 'bow' || p.anim === 'bown') hf = 1 - 0.18 * Math.sin(animProgress(p) * Math.PI);
+    const top = f.y - meta.heightPx * k * hf;
+    // lễ vật đang mang (nổi trên đầu) / khói hương
+    if (p.carrying && p.tier) {
+      if (p.tier.icon) Art.icon(ctx, p.tier.icon, f.x, top - 34 - Math.sin(t * 4 + p.breath) * 3, 0.85);
+      else if (Math.random() < 0.15) { const hp = project(p.x, 1.6, p.z - 0.15); addSmoke(hp.x, hp.y, 0.5); }
+    }
+    p._tag = { x: f.x, y: top - (p.carrying && p.tier && p.tier.icon ? 62 : 0), k };
   }
 
   function drawTags() {
+    const t = now();
     for (const p of people.values()) {
       if (!p._tag) continue;
+      // chỉ hiện tên người vừa tương tác / đang dâng lễ / đã tặng quà
+      if (!(p.gifts > 0 || p.state !== 'seated' || p.bubble || t - p.lastActive < 12)) continue;
       const { x, y, k } = p._tag;
-      const s = clamp(k * 1.25, 0.62, 1.1);
-      const ty = y - 16 * s;
+      const s = clamp(k * 1.3, 0.58, 0.95);
+      const ty = y - 13 * s;
       Art.nameTag(ctx, x, ty, s, p, p.gifts > 0);
-      if (p.bubble) Art.speech(ctx, x, ty - 20 * s, s, p.bubble.text);
+      if (p.bubble) Art.speech(ctx, x, ty - 18 * s, clamp(s * 1.25, 0.8, 1.2), p.bubble.text);
     }
   }
 
@@ -353,93 +457,101 @@
         ctx.beginPath(); ctx.arc(q.x, q.y, r, 0, Math.PI * 2); ctx.fill();
       } else if (q.kind === 'spark') {
         ctx.save(); ctx.globalCompositeOperation = 'lighter';
-        ctx.fillStyle = `rgba(255,214,120,${a})`;
+        ctx.fillStyle = `rgba(${q.rgb},${a})`;
         ctx.beginPath(); ctx.arc(q.x, q.y, q.r, 0, Math.PI * 2); ctx.fill();
         ctx.restore();
       } else if (q.kind === 'lotus') {
-        ctx.save(); ctx.globalCompositeOperation = 'lighter';
-        ctx.fillStyle = Art.rad(ctx, q.x, q.y - 10, 0, 60, [[0, `rgba(255,200,120,${0.5 * a})`], [1, 'rgba(255,200,120,0)']]);
-        ctx.beginPath(); ctx.arc(q.x, q.y - 10, 60, 0, Math.PI * 2); ctx.fill();
-        ctx.restore();
-        Art.lotus(ctx, q.x, q.y, 0.9 + Math.sin(t * 3 + q.x) * 0.05, a);
-        Art.flame(ctx, q.x, q.y - 14, t, 0.45);
+        Art.lotus(ctx, q.x, q.y, 0.7 + Math.sin(t * 3 + q.x) * 0.04, a);
+        Art.flame(ctx, q.x, q.y - 11, t, 0.36);
       }
     }
   }
 
+  function drawPetals(t, dt) {
+    for (const p of petals) {
+      p.y += p.v * dt; p.x += Math.sin(t * p.sw + p.p) * 22 * dt; p.rot += dt * p.sw;
+      if (p.y > H + 20) { p.y = -20; p.x = Math.random() * W; }
+      ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.rot);
+      ctx.fillStyle = 'rgba(255,170,205,0.75)';
+      ctx.beginPath(); ctx.ellipse(0, 0, p.r, p.r * 0.55, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+    }
+  }
+
   const vignette = document.createElement('canvas'); vignette.width = W; vignette.height = H;
-  (() => { const v = vignette.getContext('2d'); v.fillStyle = Art.rad(v, 540, 900, 520, 1250, [[0, 'rgba(0,0,0,0)'], [1, 'rgba(15,2,0,0.55)']]); v.fillRect(0, 0, W, H); })();
+  (() => { const v = vignette.getContext('2d'); v.fillStyle = Art.rad(v, 540, 900, 560, 1280, [[0, 'rgba(0,0,0,0)'], [1, 'rgba(15,2,0,0.5)']]); v.fillRect(0, 0, W, H); })();
+
+  // ---------- HUD ----------
+  function infoPanel(x, y, w, title1, title2, rows) {
+    const rowH = 62, h = 86 + rows.length * rowH;
+    Art.ornateFrame(ctx, x, y, w, h, null);
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = Art.lin(ctx, 0, y + 14, 0, y + 70, [[0, '#fff2b8'], [1, '#eeb840']]);
+    ctx.font = `700 21px ${Art.FONT_SANS}`;
+    ctx.fillText(title1, x + w / 2, y + 30); ctx.fillText(title2, x + w / 2, y + 56);
+    rows.forEach(([icon, a, b], i) => {
+      const ry = y + 80 + i * rowH;
+      ctx.fillStyle = 'rgba(255,220,150,0.09)'; Art.rr(ctx, x + 12, ry, w - 24, rowH - 6, 10); ctx.fill();
+      Art.icon(ctx, icon, x + 40, ry + 27, 0.95);
+      ctx.textAlign = 'left';
+      ctx.fillStyle = '#fff'; ctx.font = `700 20px ${Art.FONT_SANS}`; ctx.fillText(a, x + 70, ry + 18);
+      ctx.fillStyle = '#f2d6b0'; ctx.font = `400 15px ${Art.FONT_SANS}`; ctx.fillText(b, x + 70, ry + 40);
+    });
+  }
+
+  const LBL = { buddha: project(...layout.labels.buddha), tai: project(...layout.labels.tai), tinh: project(...layout.labels.tinh) };
 
   function drawHUD(t) {
-    Art.pill(ctx, 26, 30, 330, 62, 'people', `${people.size} Phật tử`);
-    Art.pill(ctx, 375, 30, 330, 62, 'lotus', `${totalLotus} tâm hoa`);
-    Art.pill(ctx, 724, 30, 330, 62, 'incense', `${Math.ceil(incense.length / 3)} nén hương`);
+    // Biển chính
+    Art.plaque(ctx, 230, 22, 620, 118, 'ĐIỆN TAM PHÚC', 'Cầu Bình An · Tài Lộc · Tình Duyên');
+    Art.lotus(ctx, 540, 30, 0.8);
 
-    Art.ornateFrame(ctx, 22, 760, 240, 330, 'Cùng tham gia');
-    const tips = [['Vào phòng', 'được mời an toạ'], ['Tặng quà', 'lên dâng hương'], ['Thả 100 tim', 'thắp 1 đèn hoa sen'], ['Bình luận', 'gửi lời nguyện cầu']];
-    tips.forEach(([a, b], i) => {
-      const y = 820 + i * 66;
-      Art.lotus(ctx, 48, y + 12, 0.38);
-      ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-      ctx.fillStyle = '#ffe3a3'; ctx.font = `700 21px ${Art.FONT_SANS}`; ctx.fillText(a, 70, y);
-      ctx.fillStyle = '#e9c9a4'; ctx.font = `400 17px ${Art.FONT_SANS}`; ctx.fillText(b, 70, y + 24);
-    });
+    infoPanel(18, 168, 250, 'BÌNH LUẬN', 'CHỌN ĐIỀU ƯỚC', [
+      ['lotus', 'Bình an', 'sức khoẻ, gia đạo'],
+      ['coins', 'Tài lộc', 'may mắn, công danh'],
+      ['heart', 'Tình duyên', 'tình yêu, hạnh phúc'],
+    ]);
+    infoPanel(812, 168, 250, 'DÂNG LỄ', 'THEO QUÀ TẶNG', [
+      ['rose', 'Hoa hồng', '→ Dâng hoa'],
+      ['note', 'TikTok', '→ Dâng hương'],
+      ['bouquet', 'Bó hoa', '→ Dâng lễ hoa'],
+      ['gift', 'Quà lớn', '→ Dâng mâm lễ'],
+      ['special', 'Quà đặc biệt', '→ Lễ trang trọng'],
+    ]);
 
-    Art.ornateFrame(ctx, 818, 760, 240, 330, 'Bảng tri ân');
-    const top = [...people.values()].filter((p) => p.gifts > 0).sort((a, b) => b.diamonds - a.diamonds).slice(0, 7);
-    const medal = ['#ffd24a', '#d8dde6', '#e09a5a'];
-    top.forEach((p, i) => {
-      const y = 814 + i * 38;
-      ctx.fillStyle = medal[i] || 'rgba(255,230,170,0.25)';
-      ctx.beginPath(); ctx.arc(848, y, 12, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = i < 3 ? '#4a0a06' : '#ffe3a3';
-      ctx.font = `700 14px ${Art.FONT_SANS}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText(String(i + 1), 848, y + 1);
-      ctx.textAlign = 'left'; ctx.fillStyle = i === 0 ? '#ffd24a' : '#fbe6bc'; ctx.font = `600 18px ${Art.FONT_SANS}`;
-      ctx.fillText(truncate(p.nickname, 10), 868, y + 1);
-      ctx.textAlign = 'right'; ctx.fillStyle = '#ffd98a'; ctx.font = `700 17px ${Art.FONT_SANS}`;
-      ctx.fillText(String(p.diamonds), 1040, y + 1);
-    });
-    if (!top.length) {
-      ctx.fillStyle = 'rgba(240,210,170,0.8)'; ctx.font = `italic 18px ${Art.FONT_SERIF}`; ctx.textAlign = 'center';
-      ctx.fillText('Chờ người hữu duyên', 938, 920);
+    // Bảng tên ban thờ
+    Art.plaque(ctx, LBL.buddha.x - 150, LBL.buddha.y - 34, 300, 68, 'ĐỨC PHẬT', 'Cầu Bình An – Sức Khoẻ');
+    Art.plaque(ctx, clamp(LBL.tai.x - 120, 12, W), LBL.tai.y - 30, 240, 64, 'THẦN TÀI', 'Cầu Tài Lộc', ZONE_STYLE.tai.colors);
+    Art.plaque(ctx, clamp(LBL.tinh.x - 120, 0, W - 252), LBL.tinh.y - 30, 240, 64, 'NGUYỆT LÃO', 'Cầu Tình Duyên', ZONE_STYLE.tinh.colors);
+
+    // Tên khu + số người
+    const zx = { tai: 180, an: 540, tinh: 900 };
+    for (const key of ['tai', 'an', 'tinh']) {
+      const st = ZONE_STYLE[key], n = zones[key].seats.filter((s) => s.occupant).length;
+      const w = 330, x = zx[key] - w / 2, y = 1800;
+      Art.plaque(ctx, x, y, w, 76, st.title, `${n} người đang cầu nguyện`, st.colors, 52);
+      Art.icon(ctx, st.icon, x + 38, y + 36, 1.15);
     }
 
-    const chatCount = chatLog.filter((c) => t - c.born < 20).length;
-    const baseY = H - 70 - chatCount * 44;
+    // Thông báo quà (dưới biển chính)
     banners.forEach((b, i) => {
       const age = t - b.born;
       const a = clamp(Math.min(age * 4, (5.5 - age) * 2), 0, 1);
-      const y = baseY - (banners.length - 1 - i) * 66;
-      const text1 = b.name, text2 = ` dâng ${b.gift} x${b.count}`;
-      ctx.font = `700 24px ${Art.FONT_SANS}`; const w1 = ctx.measureText(text1).width;
-      ctx.font = `500 24px ${Art.FONT_SANS}`; const w2 = ctx.measureText(text2).width;
-      const w = w1 + w2 + 96, x = 22 - (1 - a) * 120;
+      const y = 1118 + i * 58;
+      ctx.font = `700 23px ${Art.FONT_SANS}`; const w1 = ctx.measureText(b.name).width;
+      ctx.font = `500 23px ${Art.FONT_SANS}`; const w2 = ctx.measureText(b.text).width;
+      const w = w1 + w2 + 56, x = 540 - w / 2;
       ctx.save();
       ctx.globalAlpha = a;
-      ctx.shadowColor = 'rgba(255,170,60,0.6)'; ctx.shadowBlur = 18;
-      ctx.fillStyle = Art.lin(ctx, x, 0, x + w, 0, [[0, 'rgba(170,30,16,0.96)'], [1, 'rgba(110,10,6,0.9)']]);
-      Art.rr(ctx, x, y - 26, w, 52, 26); ctx.fill();
+      ctx.shadowColor = `rgba(${ZONE_STYLE[b.zone].glow},0.7)`; ctx.shadowBlur = 18;
+      ctx.fillStyle = Art.lin(ctx, 0, y - 24, 0, y + 24, [[0, ZONE_STYLE[b.zone].colors[0]], [1, ZONE_STYLE[b.zone].colors[1]]]);
+      Art.rr(ctx, x, y - 24, w, 48, 24); ctx.fill();
       ctx.shadowBlur = 0;
-      ctx.lineWidth = 3; ctx.strokeStyle = Art.goldH(ctx, x, x + w); Art.rr(ctx, x, y - 26, w, 52, 26); ctx.stroke();
-      Art.lotus(ctx, x + 32, y + 11, 0.48);
+      ctx.lineWidth = 2.5; ctx.strokeStyle = Art.goldH(ctx, x, x + w); Art.rr(ctx, x, y - 24, w, 48, 24); ctx.stroke();
       ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-      ctx.font = `700 24px ${Art.FONT_SANS}`; ctx.fillStyle = '#ffd98a'; ctx.fillText(text1, x + 60, y + 1);
-      ctx.font = `500 24px ${Art.FONT_SANS}`; ctx.fillStyle = '#fff4dc'; ctx.fillText(text2, x + 60 + w1, y + 1);
+      ctx.font = `700 23px ${Art.FONT_SANS}`; ctx.fillStyle = '#ffe9a8'; ctx.fillText(b.name, x + 28, y + 1);
+      ctx.font = `500 23px ${Art.FONT_SANS}`; ctx.fillStyle = '#fff'; ctx.fillText(b.text, x + 28 + w1, y + 1);
       ctx.restore();
-    });
-
-    const lines = chatLog.filter((c) => t - c.born < 20);
-    lines.forEach((c, i) => {
-      const y = H - 44 - (lines.length - 1 - i) * 44;
-      const name = truncate(c.name, 14), text = truncate(c.text, 38);
-      ctx.font = `700 21px ${Art.FONT_SANS}`; const nw = ctx.measureText(name + '  ').width;
-      ctx.font = `400 21px ${Art.FONT_SANS}`; const w = nw + ctx.measureText(text).width + 34;
-      ctx.fillStyle = 'rgba(25,4,2,0.6)'; Art.rr(ctx, 22, y - 18, w, 36, 18); ctx.fill();
-      ctx.fillStyle = '#d9a441'; Art.rr(ctx, 22, y - 18, 5, 36, 2); ctx.fill();
-      ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-      ctx.font = `700 21px ${Art.FONT_SANS}`; ctx.fillStyle = '#ffd98a'; ctx.fillText(name, 38, y + 1);
-      ctx.font = `400 21px ${Art.FONT_SANS}`; ctx.fillStyle = '#fff'; ctx.fillText(text, 38 + nw, y + 1);
     });
   }
 
@@ -451,13 +563,11 @@
     update(dt);
     ctx.drawImage(bgImg, 0, 0, W, H);
     drawAmbient(t);
-    const list = [...people.values()].sort((a, b) => a.z - b.z);
-    const behind = list.filter((p) => p.z < B.z);
-    const front = list.filter((p) => p.z >= B.z);
-    behind.forEach((p) => drawPerson(p, t));
     drawIncense(t);
-    front.forEach((p) => drawPerson(p, t));
+    drawOfferings(t);
+    [...people.values()].sort((a, b) => a.z - b.z).forEach((p) => drawPerson(p, t));
     drawParticles(t);
+    drawPetals(t, dt);
     ctx.drawImage(vignette, 0, 0);
     drawTags();
     drawHUD(t);
@@ -486,19 +596,17 @@
 
   const HO = ['Nguyễn', 'Trần', 'Lê', 'Phạm', 'Hoàng', 'Vũ', 'Đặng', 'Bùi', 'Đỗ', 'Ngô'];
   const TEN = ['An', 'Bình', 'Chi', 'Dũng', 'Hà', 'Hiền', 'Lan', 'Minh', 'Nam', 'Ngọc', 'Phúc', 'Quân', 'Thảo', 'Trang', 'Tuấn', 'Yến', 'Khang', 'Linh'];
-  const GIFTS = [['Hoa hồng', 1], ['Tim', 5], ['Đèn hoa sen', 10], ['Kem', 30], ['Nhẫn', 99]];
-  const CHATS = ['A Di Đà Phật', 'Nam mô A Di Đà Phật', 'Cho mình vào thắp hương', 'Cầu bình an cho gia đình', 'Con xin cảm ơn', 'Cầu mong sức khoẻ'];
+  const SIM_GIFTS = { hoa: ['Hoa hồng', 1], huong: ['TikTok', 1], lehoa: ['Bó hoa', 30], mamle: ['Quà lớn', 199], dacbiet: ['Quà đặc biệt', 1000] };
+  const SIM_WISH = { an: 'Cầu bình an cho gia đình', tai: 'Cầu tài lộc may mắn', tinh: 'Cầu tình duyên' };
   let simId = 0;
   const pick = (a) => a[Math.floor(Math.random() * a.length)];
   const newUser = () => { simId++; return { id: 'sim_' + Date.now().toString(36) + simId, nickname: `${pick(TEN)} ${pick(HO)}` }; };
   const existingUser = () => { const arr = [...people.values()]; if (!arr.length) return newUser(); const p = pick(arr); return { id: p.id, nickname: p.nickname }; };
-  const simGift = (user) => { const [name, diamonds] = pick(GIFTS); return post('/api/simulate', { type: 'gift', user, gift: { name, diamonds, count: 1 + Math.floor(Math.random() * 3) } }); };
+  const simGift = (key, user = existingUser()) => { const [name, diamonds] = SIM_GIFTS[key]; return post('/api/simulate', { type: 'gift', user, gift: { name, diamonds, count: 1 } }); };
+  const simWish = (key, user = newUser()) => post('/api/simulate', { type: 'chat', user, text: SIM_WISH[key] });
   const sims = {
     join: () => post('/api/simulate', { type: 'join', user: newUser() }),
     join10: () => { for (let i = 0; i < 10; i++) sims.join(); },
-    gift: () => simGift(existingUser()),
-    gift5: () => { for (let i = 0; i < 5; i++) simGift(existingUser()); },
-    chat: () => post('/api/simulate', { type: 'chat', user: existingUser(), text: pick(CHATS) }),
   };
   let autoTimer = null;
   document.querySelectorAll('[data-sim]').forEach((b) => {
@@ -509,13 +617,15 @@
         b.textContent = 'Tự động: BẬT';
         autoTimer = setInterval(() => {
           const r = Math.random();
-          if (r < 0.4) sims.join();
-          else if (r < 0.65) sims.chat();
-          else if (r < 0.85) sims.gift();
+          if (r < 0.3) sims.join();
+          else if (r < 0.6) simWish(pick(['an', 'tai', 'tinh']), Math.random() < 0.6 ? newUser() : existingUser());
+          else if (r < 0.9) simGift(pick(['hoa', 'hoa', 'huong', 'huong', 'lehoa', 'mamle', 'dacbiet']));
           else post('/api/simulate', { type: 'like', user: existingUser(), count: 50 });
-        }, 900);
+        }, 800);
         return;
       }
+      if (k.startsWith('wish:')) return simWish(k.slice(5));
+      if (k.startsWith('gift:')) return simGift(k.slice(5));
       sims[k]?.();
     };
   });

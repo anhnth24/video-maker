@@ -1,10 +1,10 @@
 {
- "frameW": 220,
- "frameH": 330,
+ "frameW": 160,
+ "frameH": 240,
  "cols": 10,
- "footX": 110,
- "footY": 275.7387202098558,
- "heightPx": 194.99644210865927,
+ "footX": 80,
+ "footY": 194.039478466538,
+ "heightPx": 130.37386425629512,
  "personHeight": 1.62,
  "anims": {
   "sit": {
@@ -66,12 +66,40 @@
    "count": 10,
    "fps": 9,
    "loop": false
+  },
+  "walkBn": {
+   "start": 79,
+   "count": 8,
+   "fps": 10,
+   "loop": true
+  },
+  "bown": {
+   "start": 87,
+   "count": 12,
+   "fps": 9,
+   "loop": false
+  },
+  "plantn": {
+   "start": 99,
+   "count": 10,
+   "fps": 9,
+   "loop": false
   }
  },
  "variants": [
   "people_0.png",
   "people_1.png",
   "people_2.png",
-  "people_3.png"
+  "people_3.png",
+  "people_4.png",
+  "people_5.png"
+ ],
+ "variantZones": [
+  "tai",
+  "tai",
+  "an",
+  "an",
+  "tinh",
+  "tinh"
  ]
 }

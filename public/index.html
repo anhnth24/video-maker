@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Chùa Online</title>
+  <title>Điện Tam Phúc</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&family=Noto+Serif:ital,wght@0,600;0,700;1,400&display=swap" rel="stylesheet" />
@@ -15,7 +15,7 @@
   </div>
 
   <aside id="panel">
-    <h2>Chùa Online · TikTok Live</h2>
+    <h2>Điện Tam Phúc · TikTok Live</h2>
     <div class="row">
       <input id="username" placeholder="@username TikTok đang live" />
       <button id="btnConnect">Kết nối</button>
@@ -27,10 +27,21 @@
     <div class="row wrap">
       <button data-sim="join">+1 người vào</button>
       <button data-sim="join10">+10 người vào</button>
-      <button data-sim="gift">Tặng quà ngẫu nhiên</button>
-      <button data-sim="gift5">5 người tặng</button>
-      <button data-sim="chat">Bình luận</button>
       <button data-sim="auto" id="btnAuto">Tự động: TẮT</button>
+    </div>
+    <h3>Bình luận chọn điều ước</h3>
+    <div class="row wrap">
+      <button data-sim="wish:an">"bình an"</button>
+      <button data-sim="wish:tai">"tài lộc"</button>
+      <button data-sim="wish:tinh">"tình duyên"</button>
+    </div>
+    <h3>Tặng quà (người ngẫu nhiên)</h3>
+    <div class="row wrap">
+      <button data-sim="gift:hoa">Hoa hồng → dâng hoa</button>
+      <button data-sim="gift:huong">TikTok → dâng hương</button>
+      <button data-sim="gift:lehoa">Bó hoa → lễ hoa</button>
+      <button data-sim="gift:mamle">Quà lớn → mâm lễ</button>
+      <button data-sim="gift:dacbiet">Quà đặc biệt → lễ trang trọng</button>
     </div>
     <p class="hint">Mở <code>?overlay=1</code> để ẩn bảng này (dùng làm Browser Source trong OBS / TikTok LIVE Studio).</p>
   </aside>

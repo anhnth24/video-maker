@@ -537,7 +537,7 @@
     banners.forEach((b, i) => {
       const age = t - b.born;
       const a = clamp(Math.min(age * 4, (5.5 - age) * 2), 0, 1);
-      const y = 1118 + i * 58;
+      const y = 176 + i * 56;
       ctx.font = `700 23px ${Art.FONT_SANS}`; const w1 = ctx.measureText(b.name).width;
       ctx.font = `500 23px ${Art.FONT_SANS}`; const w2 = ctx.measureText(b.text).width;
       const w = w1 + w2 + 56, x = 540 - w / 2;

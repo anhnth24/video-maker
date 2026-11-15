@@ -17,14 +17,15 @@ button:hover { filter: brightness(1.1); }
 .hint { font-size: 12px; opacity: .7; }
 code { background: #1a0505; padding: 1px 4px; border-radius: 4px; }
 
-/* Chế độ overlay: chỉ còn khung cảnh, full màn hình */
-body.overlay { padding: 0; background: transparent; }
-body.overlay #panel { display: none; }
-body.overlay #stage { height: 100vh; margin: 0 auto; }
-body.overlay #scene { border-radius: 0; box-shadow: none; }
-
 @media (max-width: 800px) {
   body { flex-direction: column; align-items: center; }
   #stage { height: auto; width: 100%; max-width: 480px; }
   #panel { max-width: 480px; width: 100%; }
 }
+
+/* Chế độ overlay: chỉ còn khung cảnh, full màn hình */
+body.overlay { padding: 0; background: transparent; }
+body.overlay #panel { display: none; }
+body.overlay #stage { height: auto; width: min(100vw, calc(100vh * 9 / 16)); max-width: none; margin: 0 auto; }
+body.overlay #scene { border-radius: 0; box-shadow: none; }
+

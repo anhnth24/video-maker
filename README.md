@@ -29,6 +29,7 @@ Hết ghế: người ngồi lâu nhất, không hoạt động và không có l
 
 - `PORT` – cổng (mặc định 3000)
 - `SIGN_API_KEY` – API key Euler Stream (tuỳ chọn, giúp kết nối ổn định hơn)
+- `?bg=assets/background.jpg` – thay nền vẽ sẵn bằng ảnh nền riêng (đặt file trong `public/assets/`, tỉ lệ 9:16).
 - Bố cục (số hàng, số ghế, tốc độ đi, thời gian vái...) trong `CFG` ở `public/app.js`.
 
 ## API

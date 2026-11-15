@@ -39,33 +39,37 @@ Loại lễ theo giá trị 1 món quà (sửa trong `TIERS` ở `public/app.js`
 
 Từ khoá điều ước sửa trong `WISHES` (so khớp không dấu). Hết ghế thì người ngồi lâu, chưa tặng quà sẽ nhường chỗ.
 
-## Đồ hoạ 2.5D (asset render từ 3D)
+## Đồ hoạ: 2 bộ cảnh
 
-Nền chùa và nhân vật **không vẽ tay** mà được dựng bằng Three.js rồi render sẵn ra ảnh:
+| Bộ cảnh | Mở bằng | Nền | Vị trí ghế / đường đi |
+|---|---|---|---|
+| `ai` (mặc định) | `/?overlay=1` | `public/assets/ai/background.jpg` – tranh AI 1080×1920 | Đo trực tiếp trên ảnh, sinh bởi `tools/layout-ai.js` |
+| `3d` | `/?overlay=1&scene=3d` | `public/assets/3d/background.png` – render từ Three.js | Ma trận camera xuất kèm khi render |
 
-| File | Nội dung |
-|---|---|
-| `public/assets/background.png` | Điện Tam Phúc 3D (tượng Phật, Thần Tài, Nguyệt Lão, bục thờ, lư hương, 2 bàn lễ, 3 thảm, đèn sen, sàn đá phản chiếu, bloom) – 1080×1920 |
-| `public/assets/layout.json` | Ma trận camera + vị trí ghế/lư hương/nến (mét) để runtime đặt người đúng phối cảnh |
-| `public/assets/people_0..5.png` | Sprite sheet 6 kiểu người (2 kiểu áo cho mỗi khu: vàng / lam–trắng / hồng) |
-| `public/assets/sprites.json` | Thông tin frame & động tác: `sit`, `stand`, `walkB/F/L/R` (có/không cầm hương), `bow`, `plant` |
+Nhân vật ở cả 2 bộ là sprite render từ model 3D (`people_0..5.png`: 2 kiểu áo cho mỗi khu; động tác `sit`, `stand`, `walk*`, `bow*`, `plant*`). Bộ `ai` dùng góc nhìn thấp (20°) và được tăng độ đậm màu lúc tải (`spriteFilter` trong layout) cho hợp với nền.
 
-Render lại asset (sau khi sửa `tools/render/*.js`):
+### Đổi ảnh nền AI
+
+1. Tạo ảnh 9:16 **không có người, không có chữ**, lưu đè `public/assets/ai/background.jpg` (1080×1920).
+2. Nếu bố cục khác ảnh hiện tại: sửa các số đo (đường chân trời, mép thảm, chỗ đứng dâng lễ, miệng lư hương, mặt bàn lễ…) trong `tools/layout-ai.js`.
+3. `node tools/layout-ai.js` để sinh lại `layout.json`.
+
+### Render lại asset 3D
 
 ```bash
-npm run render-assets            # cả nền và nhân vật (~3 phút)
-npm run render-assets -- temple  # chỉ nền
-npm run render-assets -- sprites # chỉ nhân vật
+npm run render-assets               # cảnh 3D + người cho cả 2 bộ (~6 phút)
+npm run render-assets -- temple     # chỉ nền 3D
+npm run render-assets -- sprites:ai # chỉ người cho bộ ai
+npm run render-assets -- sprites:3d # chỉ người cho bộ 3d
 ```
 
 Cần Chromium cho Playwright (`npx playwright install chromium` nếu máy chưa có).
-Muốn dùng ảnh nền khác (vd. tranh AI) thì mở `?bg=assets/ten-anh.png`, lưu ý phải khớp phối cảnh với `layout.json`.
 
 ## Cấu hình
 
 - `PORT` – cổng (mặc định 3000)
 - `SIGN_API_KEY` – API key Euler Stream (tuỳ chọn, giúp kết nối ổn định hơn)
-- Số hàng/ghế, vị trí camera: `WORLD` và `makeCamera()` trong `tools/render/temple.js` (render lại sau khi sửa).
+- Bộ `ai`: số hàng/ghế, vị trí trong `tools/layout-ai.js`. Bộ `3d`: `WORLD` và `makeCamera()` trong `tools/render/temple.js` (render lại sau khi sửa).
 - Tốc độ đi, số lạy, thời gian cháy hương: `CFG` trong `public/app.js`.
 
 ## API

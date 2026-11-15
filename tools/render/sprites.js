@@ -5,7 +5,8 @@ import { makeRenderer, makeEnv, lathe } from './common.js';
 const FW = 160, FH = 240;          // kích thước 1 frame trong sheet
 const SS = 2;                       // render supersample
 const COLS = 10;
-const PITCH = THREE.MathUtils.degToRad(38); // khớp góc nhìn camera nền
+// góc nhìn xuống của camera sprite (độ) – truyền qua ?pitch= để khớp với ảnh nền
+const PITCH = THREE.MathUtils.degToRad(Number(new URLSearchParams(location.search).get('pitch')) || 38);
 const VIEW_H = 2.35;                // chiều cao khung nhìn (mét)
 
 // Động tác: [tên, số frame, fps, loop]
@@ -263,6 +264,7 @@ export async function run() {
       frameW: FW, frameH: FH, cols: COLS,
       footX: foot[0], footY: foot[1],
       heightPx: foot[1] - headTop[1],   // chiều cao 1.62m trong frame
+      pxPerMeter: FH / VIEW_H,
       personHeight: 1.62,
       anims,
       variants: VARIANTS.map((_, i) => `people_${i}.png`),

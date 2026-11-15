@@ -10,13 +10,24 @@
   const params = new URLSearchParams(location.search);
   if (params.get('overlay') === '1') document.body.classList.add('overlay');
 
+  // Bộ cảnh: 'ai' (nền tranh AI, mặc định) hoặc '3d' (nền render từ Three.js)
+  const SCENE = params.get('scene') === '3d' ? '3d' : 'ai';
+  const BASE = `assets/${SCENE}/`;
   const loadImg = (src) => new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; });
   const [layout, meta] = await Promise.all([
-    fetch('assets/layout.json').then((r) => r.json()),
-    fetch('assets/sprites.json').then((r) => r.json()),
+    fetch(BASE + 'layout.json').then((r) => r.json()),
+    fetch(BASE + 'sprites.json').then((r) => r.json()),
   ]);
-  const [bgImg, ...sheets] = await Promise.all([loadImg(params.get('bg') || 'assets/background.png'), ...meta.variants.map((v) => loadImg('assets/' + v))]);
+  const [bgImg, ...sheets] = await Promise.all([loadImg(params.get('bg') || BASE + (layout.background || 'background.png')), ...meta.variants.map((v) => loadImg(BASE + v))]);
   if (document.fonts) await Promise.race([document.fonts.ready, new Promise((r) => setTimeout(r, 1500))]);
+  // Nền AI rất rực: tăng độ đậm/tương phản của sprite cho khỏi chìm (làm 1 lần lúc tải)
+  if (layout.spriteFilter) {
+    sheets.forEach((img, i) => {
+      const c = document.createElement('canvas'); c.width = img.width; c.height = img.height;
+      const g = c.getContext('2d'); g.filter = layout.spriteFilter; g.drawImage(img, 0, 0);
+      sheets[i] = c;
+    });
+  }
 
   const CFG = {
     walkSpeed: 1.35,          // m/s
@@ -54,26 +65,38 @@
     tinh: { title: 'KHU CẦU TÌNH DUYÊN', icon: 'heart', colors: ['#d03a74', '#6e0e38'], glow: '255,150,190' },
   };
 
-  // ---------- Chiếu 3D -> màn hình ----------
+  // ---------- Toạ độ & phép chiếu ----------
+  // mode 'camera' (cảnh 3D): (x, y, z) tính bằng mét, chiếu bằng ma trận camera.
+  // mode 'screen' (nền AI): x = pixel ngang, z = pixel dọc của chân người; y = độ cao (mét); cỡ người theo độ sâu.
+  const SCREEN = layout.mode === 'screen';
+  const personH = meta.personHeight;
   const M = layout.viewProj;
+  const pxm = (z) => (z - layout.horizonY) / layout.camH;                               // px / mét tại độ sâu z
+  const depthPx = (z) => (z - layout.horizonY) ** 2 / (layout.focal * layout.camH);       // px cho 1 mét theo chiều sâu
   function project(x, y, z) {
+    if (SCREEN) return { x, y: z - y * pxm(z) };
     const cx = M[0] * x + M[4] * y + M[8] * z + M[12];
     const cy = M[1] * x + M[5] * y + M[9] * z + M[13];
     const cw = M[3] * x + M[7] * y + M[11] * z + M[15];
     return { x: (cx / cw + 1) / 2 * W, y: (1 - cy / cw) / 2 * H };
   }
-  const personH = meta.personHeight;
-  const screenScale = (x, z) => (project(x, 0, z).y - project(x, personH, z).y) / meta.heightPx;
+  const screenScale = (x, z) => (SCREEN ? pxm(z) / meta.pxPerMeter : (project(x, 0, z).y - project(x, personH, z).y) / meta.heightPx);
+  // đơn vị toạ độ cho 1 mét (ngang, sâu) – dùng cho tốc độ đi
+  const metric = (z) => (SCREEN ? [pxm(z), depthPx(z)] : [1, 1]);
+  // điểm màn hình (sx, sy) -> toạ độ thế giới có cỡ lấy theo zRef
+  const at = (sx, sy, zRef) => ({ x: sx, y: (zRef - sy) / pxm(zRef), z: zRef });
+  const pt = (a) => (SCREEN ? { x: a[0], y: a[1] } : project(a[0], a[1], a[2]));
 
   const WORLD = layout.world;
   const zones = {};
-  for (const z of WORLD.zones) {
+  for (const z of (SCREEN ? layout.zones : WORLD.zones)) {
+    const seats = SCREEN ? z.seats : layout.seats.filter((s) => s.zone === z.key).filter((s) => {
+      const f = project(s.x, 0, s.z);
+      return f.x > 28 && f.x < W - 28 && f.y < H - 150;
+    });
     zones[z.key] = {
       ...z,
-      seats: layout.seats.filter((s) => s.zone === z.key).filter((s) => {
-        const f = project(s.x, 0, s.z);
-        return f.x > 28 && f.x < W - 28 && f.y < H - 150;
-      }).sort((a, b) => a.row - b.row || a.col - b.col).map((s) => ({ ...s, occupant: null })),
+      seats: [...seats].sort((a, b) => a.row - b.row || a.col - b.col).map((s) => ({ ...s, occupant: null })),
       slots: z.slots.map(([x, zz]) => ({ x, z: zz, by: null })),
       queue: [],
       variants: meta.variantZones.map((v, i) => (v === z.key ? i : -1)).filter((i) => i >= 0),
@@ -220,33 +243,38 @@
     const z = zones[p.zone];
     return z.key === 'an' ? (p.seat.x < 0 ? -WORLD.aisleX : WORLD.aisleX) : z.aisle;
   }
+  // Đường đi từ ghế lên chỗ đứng dâng lễ (đường về = đi ngược lại)
   function routeUp(p) {
+    if (SCREEN) return [...p.seat.via.map(([x, z]) => ({ x, z })), { x: p.slot.x, z: p.slot.z }];
     const a = aisleFor(p), rz = p.seat.z - 0.5;
     return [{ x: p.seat.x, z: rz }, { x: a, z: rz }, { x: a, z: WORLD.crossZ }, { x: p.slot.x, z: WORLD.crossZ }, { x: p.slot.x, z: p.slot.z }];
   }
   function routeBack(p) {
-    const a = aisleFor(p), rz = p.seat.z - 0.5;
-    return [{ x: p.slot.x, z: WORLD.crossZ }, { x: a, z: WORLD.crossZ }, { x: a, z: rz }, { x: p.seat.x, z: rz }, { x: p.seat.x, z: p.seat.z }];
+    const up = routeUp(p);
+    return [...up.slice(0, -1).reverse(), { x: p.seat.x, z: p.seat.z }];
   }
   function stepPath(p, dt) {
-    let dist = CFG.walkSpeed * dt;
+    let dist = CFG.walkSpeed * dt; // mét
     while (dist > 0 && p.path.length) {
       const t = p.path[0];
-      const dx = t.x - p.x, dz = t.z - p.z, d = Math.hypot(dx, dz);
+      const [mx, mz] = metric(p.z);
+      const dx = (t.x - p.x) / mx, dz = (t.z - p.z) / mz, d = Math.hypot(dx, dz);
       if (d > 0.001) { const want = walkAnim(p, dx, dz); if (p.anim !== want) { const keep = p.animT; play(p, want); p.animT = keep; } }
       if (d <= dist) { p.x = t.x; p.z = t.z; p.path.shift(); dist -= d; }
-      else { p.x += (dx / d) * dist; p.z += (dz / d) * dist; dist = 0; }
+      else { const u = Math.min(dist, 0.25) / d; p.x += (t.x - p.x) * u; p.z += (t.z - p.z) * u; dist -= Math.min(dist, 0.25); }
     }
     return p.path.length === 0;
   }
 
   // Điểm đặt lễ trên ban của từng khu
   function offerSpot(zoneKey) {
+    if (SCREEN) { const a = zones[zoneKey].offerAreas; const [x0, x1, y, zRef] = a[Math.floor(Math.random() * a.length)]; return at(rand(x0, x1), y + rand(-3, 3), zRef); }
     if (zoneKey === 'an') { const s = Math.random() < 0.5 ? -1 : 1; return { x: s * rand(1.05, 2.3), y: WORLD.stageH + 0.02, z: WORLD.stageFrontZ - 0.25 }; }
     const o = zones[zoneKey].offer;
     return { x: o[0] + rand(-0.95, 0.95), y: 0.86, z: o[2] + rand(-0.18, 0.18) };
   }
   function incenseSpot(zoneKey, px) {
+    if (SCREEN) { const c = zones[zoneKey].incense; return at(c.x + rand(-c.spread, c.spread), c.y + rand(-3, 3), c.zRef); }
     if (zoneKey === 'an') return { x: B.x + clamp(px - B.x, -0.45, 0.45) + rand(-0.04, 0.04), y: B.y - 0.02, z: B.z + 0.25 + rand(-0.12, 0.12) };
     const o = zones[zoneKey].offer;
     return { x: o[0] + rand(-0.14, 0.14), y: 1.02, z: o[2] + rand(-0.08, 0.08) };
@@ -254,7 +282,7 @@
 
   function deliver(p, t) {
     const tier = p.tier, zk = p.zone;
-    const from = project(p.x, 1.35, p.z - 0.3);
+    const from = project(p.x, 1.35, p.z);
     if (tier.key === 'huong') {
       for (let i = 0; i < 3; i++) { const s = incenseSpot(zk, p.x); incense.push({ ...s, born: t, tilt: rand(-0.12, 0.12) }); }
       while (incense.length > 90) incense.shift();
@@ -264,7 +292,7 @@
       flying.push({ icon: tier.icon, from, spot, born: t, dur: 0.7, tier });
     }
     if (tier.key === 'dacbiet' || tier.key === 'mamle') {
-      const d = layout.deities[zk]; const c = project(d[0], d[1], d[2]);
+      const c = pt(layout.deities[zk]);
       pulses.push({ x: c.x, y: c.y, born: t, big: tier.key === 'dacbiet', glow: ZONE_STYLE[zk].glow });
       if (tier.key === 'dacbiet') for (let i = 0; i < 6; i++) setTimeout(() => firework(c.x + rand(-260, 260), c.y + rand(-260, 40)), i * 260);
     }
@@ -349,8 +377,8 @@
   }
 
   // ---------- Vẽ ----------
-  const haloP = project(...layout.halo);
-  const candles = layout.candles.map(([x, y, z]) => project(x, y, z));
+  const haloP = pt(layout.halo);
+  const candles = layout.candles.map(pt);
 
   function drawAmbient(t) {
     ctx.save();
@@ -381,7 +409,7 @@
   function drawIncense(t) {
     for (const s of incense) {
       const burnt = clamp((t - s.born) / CFG.incenseLife, 0, 1);
-      const len = 0.38 * (1 - burnt * 0.7);
+      const len = (SCREEN ? 0.6 : 0.38) * (1 - burnt * 0.7);
       const base = project(s.x, s.y, s.z);
       const tip = project(s.x + Math.sin(s.tilt) * len, s.y + Math.cos(s.tilt) * len, s.z);
       ctx.strokeStyle = '#b4542a'; ctx.lineWidth = 2;
@@ -429,7 +457,7 @@
     // lễ vật đang mang (nổi trên đầu) / khói hương
     if (p.carrying && p.tier) {
       if (p.tier.icon) Art.icon(ctx, p.tier.icon, f.x, top - 34 - Math.sin(t * 4 + p.breath) * 3, 0.85);
-      else if (Math.random() < 0.15) { const hp = project(p.x, 1.6, p.z - 0.15); addSmoke(hp.x, hp.y, 0.5); }
+      else if (Math.random() < 0.15) { const hp = project(p.x, 1.6, p.z); addSmoke(hp.x, hp.y, 0.5); }
     }
     p._tag = { x: f.x, y: top - (p.carrying && p.tier && p.tier.icon ? 62 : 0), k };
   }
@@ -479,7 +507,7 @@
   }
 
   const vignette = document.createElement('canvas'); vignette.width = W; vignette.height = H;
-  (() => { const v = vignette.getContext('2d'); v.fillStyle = Art.rad(v, 540, 900, 560, 1280, [[0, 'rgba(0,0,0,0)'], [1, 'rgba(15,2,0,0.5)']]); v.fillRect(0, 0, W, H); })();
+  (() => { const v = vignette.getContext('2d'); v.fillStyle = Art.rad(v, 540, 900, 560, 1280, [[0, 'rgba(0,0,0,0)'], [1, `rgba(15,2,0,${SCREEN ? 0.3 : 0.5})`]]); v.fillRect(0, 0, W, H); })();
 
   // ---------- HUD ----------
   function infoPanel(x, y, w, title1, title2, rows) {
@@ -499,7 +527,7 @@
     });
   }
 
-  const LBL = { buddha: project(...layout.labels.buddha), tai: project(...layout.labels.tai), tinh: project(...layout.labels.tinh) };
+  const LBL = { buddha: pt(layout.labels.buddha), tai: pt(layout.labels.tai), tinh: pt(layout.labels.tinh) };
 
   function drawHUD(t) {
     // Biển chính

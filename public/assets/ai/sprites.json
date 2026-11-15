@@ -1,0 +1,106 @@
+{
+ "frameW": 160,
+ "frameH": 240,
+ "cols": 10,
+ "footX": 80,
+ "footY": 208.29111943384203,
+ "heightPx": 155.46914509002605,
+ "pxPerMeter": 102.12765957446808,
+ "personHeight": 1.62,
+ "anims": {
+  "sit": {
+   "start": 0,
+   "count": 1,
+   "fps": 1,
+   "loop": true
+  },
+  "stand": {
+   "start": 1,
+   "count": 8,
+   "fps": 12,
+   "loop": false
+  },
+  "walkB": {
+   "start": 9,
+   "count": 8,
+   "fps": 10,
+   "loop": true
+  },
+  "walkF": {
+   "start": 17,
+   "count": 8,
+   "fps": 10,
+   "loop": true
+  },
+  "walkLi": {
+   "start": 25,
+   "count": 8,
+   "fps": 10,
+   "loop": true
+  },
+  "walkRi": {
+   "start": 33,
+   "count": 8,
+   "fps": 10,
+   "loop": true
+  },
+  "walkL": {
+   "start": 41,
+   "count": 8,
+   "fps": 10,
+   "loop": true
+  },
+  "walkR": {
+   "start": 49,
+   "count": 8,
+   "fps": 10,
+   "loop": true
+  },
+  "bow": {
+   "start": 57,
+   "count": 12,
+   "fps": 9,
+   "loop": false
+  },
+  "plant": {
+   "start": 69,
+   "count": 10,
+   "fps": 9,
+   "loop": false
+  },
+  "walkBn": {
+   "start": 79,
+   "count": 8,
+   "fps": 10,
+   "loop": true
+  },
+  "bown": {
+   "start": 87,
+   "count": 12,
+   "fps": 9,
+   "loop": false
+  },
+  "plantn": {
+   "start": 99,
+   "count": 10,
+   "fps": 9,
+   "loop": false
+  }
+ },
+ "variants": [
+  "people_0.png",
+  "people_1.png",
+  "people_2.png",
+  "people_3.png",
+  "people_4.png",
+  "people_5.png"
+ ],
+ "variantZones": [
+  "tai",
+  "tai",
+  "an",
+  "an",
+  "tinh",
+  "tinh"
+ ]
+}

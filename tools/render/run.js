@@ -6,7 +6,9 @@ const { chromium } = require('playwright');
 
 const ROOT = path.join(__dirname, '..', '..');
 const OUT = path.join(ROOT, 'public', 'assets');
-const jobs = process.argv.slice(2).length ? process.argv.slice(2) : ['temple', 'sprites'];
+// job: temple (cảnh 3D) | sprites:3d (người cho cảnh 3D, nhìn xuống 38°) | sprites:ai (người cho nền AI, nhìn xuống 20°)
+const jobs = process.argv.slice(2).length ? process.argv.slice(2) : ['temple', 'sprites:3d', 'sprites:ai'];
+const SPRITE_PITCH = { '3d': 38, ai: 20 };
 
 function saveDataUrl(file, url) {
   fs.writeFileSync(file, Buffer.from(url.split(',')[1], 'base64'));
@@ -29,19 +31,22 @@ function saveDataUrl(file, url) {
       const page = await browser.newPage({ viewport: { width: 1080, height: 1920 } });
       page.on('console', (m) => { if (m.type() === 'error' || m.type() === 'warning') console.log('  [page]', m.text()); });
       page.on('pageerror', (e) => console.log('  [pageerror]', e.message));
-      await page.goto(`http://localhost:${port}/index.html?job=${job}`);
+      const [name, variant = '3d'] = job.split(':');
+      const outDir = path.join(OUT, name === 'temple' ? '3d' : variant);
+      fs.mkdirSync(outDir, { recursive: true });
+      await page.goto(`http://localhost:${port}/index.html?job=${name}&pitch=${SPRITE_PITCH[variant] || 38}`);
       await page.waitForFunction(() => window.__done === true, null, { timeout: 30 * 60 * 1000, polling: 500 });
       const err = await page.evaluate(() => window.__error);
       if (err) throw new Error(err);
       const res = await page.evaluate(() => window.__result);
-      if (job === 'temple') {
-        saveDataUrl(path.join(OUT, 'background.png'), res.png);
-        fs.writeFileSync(path.join(OUT, 'layout.json'), JSON.stringify(res.layout, null, 1));
-        console.log('  wrote public/assets/layout.json');
-      } else if (job === 'sprites') {
-        res.sheets.forEach((url, i) => saveDataUrl(path.join(OUT, `people_${i}.png`), url));
-        fs.writeFileSync(path.join(OUT, 'sprites.json'), JSON.stringify(res.meta, null, 1));
-        console.log('  wrote public/assets/sprites.json');
+      if (name === 'temple') {
+        saveDataUrl(path.join(outDir, 'background.png'), res.png);
+        fs.writeFileSync(path.join(outDir, 'layout.json'), JSON.stringify(res.layout, null, 1));
+        
+      } else if (name === 'sprites') {
+        res.sheets.forEach((url, i) => saveDataUrl(path.join(outDir, `people_${i}.png`), url));
+        fs.writeFileSync(path.join(outDir, 'sprites.json'), JSON.stringify(res.meta, null, 1));
+        
       }
       console.log(`  done in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
       await page.close();

@@ -25,12 +25,36 @@ TIKTOK_USERNAME=ten_kenh npm start
 
 Hết ghế: người ngồi lâu nhất, không hoạt động và không có lượt quà chờ sẽ nhường chỗ.
 
+## Đồ hoạ 2.5D (asset render từ 3D)
+
+Nền chùa và nhân vật **không vẽ tay** mà được dựng bằng Three.js rồi render sẵn ra ảnh:
+
+| File | Nội dung |
+|---|---|
+| `public/assets/background.png` | Chính điện 3D (tượng Phật, đài sen, hào quang, bàn thờ, lư hương, cột rồng, đèn lồng, sàn đá phản chiếu, bloom) – 1080×1920 |
+| `public/assets/layout.json` | Ma trận camera + vị trí ghế/lư hương/nến (mét) để runtime đặt người đúng phối cảnh |
+| `public/assets/people_0..3.png` | Sprite sheet 4 kiểu người (áo tràng lam/nâu/trắng/lam đậm, tóc đen/bạc/búi) |
+| `public/assets/sprites.json` | Thông tin frame & động tác: `sit`, `stand`, `walkB/F/L/R` (có/không cầm hương), `bow`, `plant` |
+
+Luồng khi có người tặng quà: **đứng dậy → đi ra lối giữa → lên lư hương (cầm 3 nén hương) → vái 3 lạy → cắm hương → quay về → ngồi xuống**.
+
+Render lại asset (sau khi sửa `tools/render/*.js`):
+
+```bash
+npm run render-assets            # cả nền và nhân vật
+npm run render-assets -- temple  # chỉ nền
+npm run render-assets -- sprites # chỉ nhân vật
+```
+
+Cần Chromium cho Playwright (`npx playwright install chromium` nếu máy chưa có).
+Muốn dùng ảnh nền khác (vd. tranh AI) thì mở `?bg=assets/ten-anh.png`, lưu ý phải khớp phối cảnh với `layout.json`.
+
 ## Cấu hình
 
 - `PORT` – cổng (mặc định 3000)
 - `SIGN_API_KEY` – API key Euler Stream (tuỳ chọn, giúp kết nối ổn định hơn)
-- `?bg=assets/background.jpg` – thay nền vẽ sẵn bằng ảnh nền riêng (đặt file trong `public/assets/`, tỉ lệ 9:16).
-- Bố cục (số hàng, số ghế, tốc độ đi, thời gian vái...) trong `CFG` ở `public/app.js`.
+- Số hàng/ghế, vị trí camera: `WORLD` và `makeCamera()` trong `tools/render/temple.js` (render lại sau khi sửa).
+- Tốc độ đi, số lạy, thời gian cháy hương: `CFG` trong `public/app.js`.
 
 ## API
 

@@ -1,0 +1,77 @@
+{
+ "frameW": 220,
+ "frameH": 330,
+ "cols": 10,
+ "footX": 110,
+ "footY": 275.7387202098558,
+ "heightPx": 194.99644210865927,
+ "personHeight": 1.62,
+ "anims": {
+  "sit": {
+   "start": 0,
+   "count": 1,
+   "fps": 1,
+   "loop": true
+  },
+  "stand": {
+   "start": 1,
+   "count": 8,
+   "fps": 12,
+   "loop": false
+  },
+  "walkB": {
+   "start": 9,
+   "count": 8,
+   "fps": 10,
+   "loop": true
+  },
+  "walkF": {
+   "start": 17,
+   "count": 8,
+   "fps": 10,
+   "loop": true
+  },
+  "walkLi": {
+   "start": 25,
+   "count": 8,
+   "fps": 10,
+   "loop": true
+  },
+  "walkRi": {
+   "start": 33,
+   "count": 8,
+   "fps": 10,
+   "loop": true
+  },
+  "walkL": {
+   "start": 41,
+   "count": 8,
+   "fps": 10,
+   "loop": true
+  },
+  "walkR": {
+   "start": 49,
+   "count": 8,
+   "fps": 10,
+   "loop": true
+  },
+  "bow": {
+   "start": 57,
+   "count": 12,
+   "fps": 9,
+   "loop": false
+  },
+  "plant": {
+   "start": 69,
+   "count": 10,
+   "fps": 9,
+   "loop": false
+  }
+ },
+ "variants": [
+  "people_0.png",
+  "people_1.png",
+  "people_2.png",
+  "people_3.png"
+ ]
+}

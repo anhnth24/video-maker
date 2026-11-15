@@ -4,7 +4,8 @@
   "description": "Overlay đi chùa online tích hợp TikTok Live",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "render-assets": "node tools/render/run.js"
   },
   "repository": {
     "type": "git",
@@ -22,5 +23,9 @@
     "socket.io": "^4.8.1",
     "tiktok-live-connector": "^2.5.0"
   },
-  "private": true
+  "private": true,
+  "devDependencies": {
+    "playwright": "^1.63.0",
+    "three": "^0.170.0"
+  }
 }
